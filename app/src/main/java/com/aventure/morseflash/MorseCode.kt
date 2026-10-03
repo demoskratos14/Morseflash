@@ -7,6 +7,13 @@ data class Step(val on: Boolean, val ms: Long)
 
 object MorseCode {
 
+    /**
+     * Vitesse d'émission BLOQUÉE : une unité = 300 ms (point 300 ms, trait 900 ms).
+     * Valeur choisie pour qu'une caméra à 30 images/s capte chaque signal avec
+     * une marge confortable (≈ 9 images par point).
+     */
+    const val TRANSMIT_UNIT_MS = 300L
+
     private val table: Map<Char, String> = mapOf(
         'A' to ".-", 'B' to "-...", 'C' to "-.-.", 'D' to "-..", 'E' to ".",
         'F' to "..-.", 'G' to "--.", 'H' to "....", 'I' to "..", 'J' to ".---",
@@ -23,6 +30,11 @@ object MorseCode {
         '$' to "...-..-", '@' to ".--.-."
     )
 
+    private val reverse: Map<String, Char> = table.entries.associate { it.value to it.key }
+
+    /** ".-" -> 'A' (null si la séquence est inconnue). */
+    fun decodeLetter(code: String): Char? = reverse[code]
+
     /** Retire les accents (é -> E) et met en majuscules. */
     private fun normalize(text: String): String =
         Normalizer.normalize(text, Normalizer.Form.NFD)
@@ -37,12 +49,26 @@ object MorseCode {
             }
 
     /**
+     * Séquence de calibrage optionnelle : "-.-.-" (3-1-3 avec pauses d'une unité) puis une pause de mot.
+     * Elle permet au récepteur de déduire la vitesse dès le début, même pour un message d'une seule lettre.
+     */
+    fun calibrationSteps(unitMs: Long): List<Step> = listOf(
+        Step(true, 3 * unitMs), Step(false, unitMs),
+        Step(true, unitMs), Step(false, unitMs),
+        Step(true, 3 * unitMs), Step(false, unitMs),
+        Step(true, unitMs), Step(false, unitMs),
+        Step(true, 3 * unitMs), Step(false, 7 * unitMs)
+    )
+
+    /**
      * Convertit le texte en suite d'étapes allumé/éteint.
      * Point = 1 unité, trait = 3, pause entre signes = 1, entre lettres = 3, entre mots = 7.
      */
-    fun toSteps(text: String, unitMs: Long): List<Step> {
+    fun toSteps(text: String, unitMs: Long, calibration: Boolean = false): List<Step> {
         val steps = mutableListOf<Step>()
         val words = normalize(text).trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+
+        if (calibration && words.isNotEmpty()) steps += calibrationSteps(unitMs)
 
         words.forEachIndexed { wi, word ->
             if (wi > 0) steps += Step(false, 7 * unitMs)
